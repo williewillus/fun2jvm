@@ -1,8 +1,8 @@
 Contribution of each team member:
-
+N/A (Solo project)
 
 What did you propose to do?
-
+Produce a Java program that compiles .fun files into JVM .class files.
 
 what did you actually do?
 

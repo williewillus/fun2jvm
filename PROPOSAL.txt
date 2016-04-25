@@ -1,8 +1,37 @@
 Team members:
-
-
-
-
+N/A (Solo project)
 
 Proposal:
+This project was already proposed and accepted on Piazza
+(https://piazza.com/class/ijkp9ilx6hu3wa?cid=484)
 
+The Piazza post in question is replicated here for convenience:
+
+-- BEGIN QUOTE -- 
+
+p13 idea
+I had an idea for p13, that I just wanted to throw out there before I forget.
+ 
+How does modifying p4/p5 to emit Java bytecode sound? This would be a C program (or maybe Java)
+ 
+In short, I would feed a .fun into some C or Java program p13, and it will emit the raw hex of a Java .class file (to stdout, or a file, or whatever). This class file will contain a generated Java main method and thus can be run by the JVM, and should produce the same result as if the .fun were passed through p4/p5 and the resulting x86/powerpc assembly run (besides maybe the slightly differing semantics of C printf and Java System.out.printf regarding unsigned types, I probably would have to implement print with custom logic)
+ 
+Challenges:
+Understanding Java class file format (no knowledge here)
+Understanding Java bytecode (I have some very limited knowledge here)
+Understanding how to properly generate methods and local variable tables for every method (no knowledge here)
+Converting register-based p4/p5 to stack based JVM (shouldn't be extremely difficult)
+There might be some difficulty with matching p4/p5 exactly because of Java's using signed types by default. I don't know how that would affect the viability of this idea though
+(Optionally) expand fun to have more "things" (tbd)
+ 
+I think it's pretty doable, every construct in the fun language is replicatable in JVM bytecode. Functions would become actual static methods in the class, global fun variables would just become static variables in the class, everything would be of java type long, etc.
+ 
+I'd have to reuse the provided parser implementation in p4/p5 (or port it to java if I decide to do p13 there). If I decide to extend the fun language (and its Java compiler) beyond the p4/p5 spec I'll make the relevant changes to the parser myself.
+
+Instructor Response: This is a great idea. Please go for it.
+
+-- END QUOTE --
+
+Since that post, I have made a few decisions
+* I will use Java
+* I have ported my own parser from p3 to Java for usage, not the given one in p4 and p5
