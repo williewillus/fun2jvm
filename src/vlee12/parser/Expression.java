@@ -24,16 +24,16 @@ public class Expression {
     }
 
     public static class Val extends Expression {
-        public final long value_unsigned;
+        public final int value_unsigned;
 
-        Val(long val) {
+        Val(int val) {
             super(ExpressionType.VAL);
             this.value_unsigned = val;
         }
 
         @Override
         public String toString() {
-            return Long.toUnsignedString(value_unsigned);
+            return Integer.toUnsignedString(value_unsigned);
         }
     }
 

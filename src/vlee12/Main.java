@@ -18,18 +18,31 @@ public class Main {
     public static void main(String[] args) {
         if (args.length == 0)
             System.err.println("Need input file!");
-        else {
+        else if (validateArgs(args)) {
             try {
                 Path p = Paths.get(args[0]);
                 List<Fun> funs = Parser.parse(Files.newBufferedReader(p));
                 funs.forEach(System.out::println);
-                byte[] byteCode = Compiler.compile(funs, p.getFileName().toString());
-                try (DataOutputStream out = new DataOutputStream(new FileOutputStream(p.getFileName().toString() + ".class"))) {
+
+                String name = p.getFileName().toString();
+                String realName = name.substring(0, name.indexOf(".fun"));
+
+                byte[] byteCode = Compiler.compile(funs, realName);
+                try (DataOutputStream out = new DataOutputStream(new FileOutputStream(realName + ".class"))) {
                     out.write(byteCode);
                 }
             } catch (IOException | CompileException ex) {
                 ex.printStackTrace();
             }
         }
+    }
+
+    private static boolean validateArgs(String[] args) {
+        if (!args[0].contains(".fun")) {
+            System.err.println("Must be a .fun file");
+            return false;
+        }
+
+        return true;
     }
 }

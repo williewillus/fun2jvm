@@ -33,7 +33,9 @@ abstract class ConstantPoolEntry {
 
             ret = new byte[bytes.size() + 1];
             ret[0] = type.id;
-            System.arraycopy(bytes.toByteArray(), 2, ret, 1, bytes.size());
+            ret[1] = (byte) ((bytes.size() - 2) >>> 8);
+            ret[2] = (byte) (bytes.size() - 2);
+            System.arraycopy(bytes.toByteArray(), 2, ret, 3, bytes.size() - 2); // Skip 2 length bytes at beginning
         }
 
         @Override
@@ -82,40 +84,6 @@ abstract class ConstantPoolEntry {
         }
     }
 
-    static class Long extends ConstantPoolEntry {
-
-        private final byte[] ret;
-
-        Long(long val) {
-            super(EntryType.LONG);
-            ret = new byte[9];
-            ret[0] = type.id;
-            ret[1] = (byte) (val >>> 56);
-            ret[2] = (byte) (val >>> 48);
-            ret[3] = (byte) (val >>> 40);
-            ret[4] = (byte) (val >>> 32);
-            ret[5] = (byte) (val >>> 24);
-            ret[6] = (byte) (val >>> 16);
-            ret[7] = (byte) (val >>> 8);
-            ret[8] = (byte) (val);
-        }
-
-        @Override
-        byte[] getBytes() {
-            return ret;
-        }
-
-        @Override
-        public int hashCode() {
-            return Arrays.hashCode(ret);
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            return o instanceof Long && Arrays.equals(ret, ((Long) o).ret);
-        }
-    }
-
     static class Class extends ConstantPoolEntry {
 
         private final byte[] ret;
@@ -141,34 +109,6 @@ abstract class ConstantPoolEntry {
         @Override
         public boolean equals(Object o) {
             return o instanceof Class && Arrays.equals(ret, ((Class) o).ret);
-        }
-    }
-
-    static class String extends ConstantPoolEntry {
-
-        private final byte[] ret;
-
-        String(short index) {
-            super(EntryType.STRING);
-            ret = new byte[3];
-            ret[0] = type.id;
-            ret[1] = (byte) (index >>> 8);
-            ret[2] = (byte) (index);
-        }
-
-        @Override
-        byte[] getBytes() {
-            return ret;
-        }
-
-        @Override
-        public int hashCode() {
-            return Arrays.hashCode(ret);
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            return o instanceof String && Arrays.equals(ret, ((String) o).ret);
         }
     }
 
@@ -262,12 +202,10 @@ abstract class ConstantPoolEntry {
         }
     }
 
-    private enum EntryType {
+    public enum EntryType {
         UTF8(1),
         INTEGER(3),
-        LONG(5),
         CLASS(7),
-        STRING(8),
         FIELD(9),
         METHOD(10),
         NAME_AND_TYPE(12);

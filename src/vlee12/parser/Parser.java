@@ -48,7 +48,7 @@ public class Parser {
     private int line = 0;
     private int pos = -1;
     private String curIdentifier = "";
-    private long curValue_unsigned = 0;
+    private int curValue_unsigned = 0;
 
     private Parser(char[] program) {
         this.buf = program;
@@ -117,7 +117,7 @@ public class Parser {
                     counter = curIndex + toAdvance;
                 }
 
-                curValue_unsigned = Long.parseUnsignedLong(a);
+                curValue_unsigned = Integer.parseUnsignedInt(a);
                 curToken = INT;
             } else {
                 switch (c) {

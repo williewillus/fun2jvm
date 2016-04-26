@@ -7,20 +7,18 @@ import vlee12.parser.Statement;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 public class Compiler {
     public static byte[] compile(List<Fun> funs, String className) {
-        try {
-            return new Compiler(funs, className).genHex();
-        } catch (IOException neverHappens) {
-            return new byte[0];
-        }
+        return new Compiler(funs, className).genHex();
     }
 
     private final List<Fun> funs;
@@ -31,7 +29,7 @@ public class Compiler {
 
     private Compiler(List<Fun> funs, String name) {
         this.funs = funs;
-        this.className = "fun2jvm/gen/" + name;
+        this.className = "" + name;
     }
 
     private short findOrPut(ConstantPoolEntry entry) {
@@ -68,15 +66,22 @@ public class Compiler {
         return findOrPut(new ConstantPoolEntry.Field(classIndex, callNameAndTypeIndex));
     }
 
+    private void putInt(ByteArrayOutputStream bytes, int intToPut) {
+        bytes.write(intToPut >>> 24 & 0xFF);
+        bytes.write(intToPut >>> 16 & 0xFF);
+        bytes.write(intToPut >>> 8 & 0xFF);
+        bytes.write(intToPut & 0xFF);
+    }
+
     private void putShort(ByteArrayOutputStream bytes, int shortToPut) {
-        if (shortToPut != ((short) shortToPut)) {
+        if ((shortToPut >>> 16 & 0xFFFF) != 0) {
             System.err.println("Short will be truncated!");
         }
         bytes.write(shortToPut >>> 8 & 0xFF);
         bytes.write(shortToPut & 0xFF);
     }
 
-    private byte[] genHex() throws IOException {
+    private byte[] genHex() {
         // -- Setup -- //
         short thisClassIndex = getClassConstant(className);
         short superClassIndex = getClassConstant("java/lang/Object");
@@ -97,9 +102,9 @@ public class Compiler {
             throw new CompileException("No main fun found");
         }
         
-        byte[] clinit = genCtor(true);
-        byte[] init = genCtor(false);
-        byte[] mainMethod = genMainMethod(mainFunArgCount);
+        ByteArrayOutputStream clinit = genCtor(true);
+        ByteArrayOutputStream init = genCtor(false);
+        ByteArrayOutputStream mainMethod = genMainMethod(mainFunArgCount);
         
         // -- Actual file -- //
 
@@ -108,15 +113,16 @@ public class Compiler {
         putShort(bytes, 0xBABE);
 
         // Compiling for JVM 6u0 (version 50.0)
-        bytes.write(0x00); // minor 0
-        bytes.write(0x32); // major 50
+        putShort(bytes, 0);    // minor 0
+        putShort(bytes, 0x32); // major 50
 
         // Constant pool size
         putShort(bytes, constantPoolEntries.size() + 1);
+        System.out.printf("Added %d constant pool entries %n", constantPoolEntries.size());
 
         // Constant pool
         for (ConstantPoolEntry e : constantPoolEntries) {
-            bytes.write(e.getBytes());
+            append(bytes, e.getBytes());
         }
 
         // Access flags
@@ -137,172 +143,159 @@ public class Compiler {
 
         // field count
         putShort(bytes, globalVars.size());
+        System.out.printf("Added %d vars %n", globalVars.size());
 
         // fields
         for (String var : globalVars) {
-            bytes.write(genGlobalVar(var));
+            append(bytes, genGlobalVar(var));
         }
 
         // method count
-        putShort(bytes, funs.size());
+        putShort(bytes, funHex.size() + 3);
+        System.out.printf("Added %d methods %n", funHex.size() + 3);
 
         // methods
-        bytes.write(clinit);
-        bytes.write(init);
-        bytes.write(mainMethod);
+        append(bytes, clinit);
+        append(bytes, init);
+        append(bytes, mainMethod);
 
         for (byte[] arr : funHex) {
-            bytes.write(arr);
+            append(bytes, arr);
         }
 
         // class attribute count and no class attributes
         putShort(bytes, 0);
-
         return bytes.toByteArray();
     }
 
     private byte[] genGlobalVar(String name) {
-        byte[] ret = new byte[8];
+        ByteArrayOutputStream ret = new ByteArrayOutputStream(8);
         short flags = 0;
         flags |= 0x0002; // PRIVATE
         flags |= 0x0008; // STATIC
         flags |= 0x1000; // SYNTHETIC
-        ret[0] = (byte) (flags >>> 8 & 0xFF);
-        ret[1] = (byte) (flags & 0xFF);
+        putShort(ret, flags);
 
-        short nameIndex = findOrPut(new ConstantPoolEntry.Utf8(name));
-        ret[2] = (byte) (nameIndex >>> 8 & 0xFF);
-        ret[3] = (byte) (nameIndex & 0xFF);
+        // Name
+        putShort(ret, findOrPut(new ConstantPoolEntry.Utf8(name)));
 
-        short descriptorIndex = findOrPut(new ConstantPoolEntry.Utf8("J"));
-        ret[4] = (byte) (descriptorIndex >>> 8 & 0xFF);
-        ret[5] = (byte) (descriptorIndex & 0xFF);
+        // Descriptor
+        putShort(ret, findOrPut(new ConstantPoolEntry.Utf8("I")));
 
         // No attributes
-        ret[6] = 0;
-        ret[7] = 0;
+        putShort(ret, 0);
 
-        return ret;
+        return ret.toByteArray();
     }
 
-    private byte[] genMainMethod(int mainFunArgCount) {
+    private ByteArrayOutputStream genMainMethod(int mainFunArgCount) {
         ByteArrayOutputStream ret = new ByteArrayOutputStream();
         
         short flags = 0;
         flags |= 0x0001; // PUBLIC
         flags |= 0x0008; // STATIC
+        flags |= 0x0080; // VARARGS
         flags |= 0x1000; // SYNTHETIC
 
-        ret.write(flags >>> 8 & 0xFF);
-        ret.write(flags & 0xFF);
+        putShort(ret, flags);
 
         short nameIndex = findOrPut(new ConstantPoolEntry.Utf8("main"));
-        ret.write(nameIndex >>> 8 & 0xFF);
-        ret.write(nameIndex & 0xFF);
+        putShort(ret, nameIndex);
 
         short descriptorIndex = findOrPut(new ConstantPoolEntry.Utf8("([Ljava/lang/String;)V"));
-        ret.write(descriptorIndex >>> 8 & 0xFF);
-        ret.write(descriptorIndex & 0xFF);
+        putShort(ret, descriptorIndex);
 
         // Attribute count
-        ret.write(0);
-        ret.write(1);
+        putShort(ret, 0x1);
 
         // code attribute
         putShort(ret, findOrPut(new ConstantPoolEntry.Utf8("Code")));
 
         // code attribute attribute length (12 + codeLength below this)
         int codeAttribLength = 12 + (mainFunArgCount + 4);
-        ret.write(codeAttribLength >>> 24 & 0xFF);
-        ret.write(codeAttribLength >>> 16 & 0xFF);
-        ret.write(codeAttribLength >>> 8 & 0xFF);
-        ret.write(codeAttribLength & 0xFF);
+        putInt(ret, codeAttribLength);
 
         // max stack
-        putShort(ret, mainFunArgCount * 2);
+        putShort(ret, mainFunArgCount);
 
         // max locals
-        putShort(ret, 0);
+        putShort(ret, 1);
 
         // code length
         int codeLength = mainFunArgCount + 4; // Push args (n) + invokestatic (3) + return (1)
-        ret.write(codeLength >>> 24 & 0xFF);
-        ret.write(codeLength >>> 16 & 0xFF);
-        ret.write(codeLength >>> 8 & 0xFF);
-        ret.write(codeLength & 0xFF);
+        putInt(ret, codeLength);
 
         for (int i = 0; i < mainFunArgCount; i++) {
-            ret.write(0x09); // lconst_0
+            ret.write(0x03); // iconst_0
         }
 
         // invokestatic
         ret.write(0xB8);
-        putShort(ret, getMethodRef(className, "$main", "(" + String.join("", Collections.nCopies(mainFunArgCount, "J")) + ")J"));
+        putShort(ret, getMethodRef(className, "$main", "(" + String.join("", Collections.nCopies(mainFunArgCount, "I")) + ")I"));
 
         // Return
         ret.write(0xB1);
 
         // exception table length
-        ret.write(0);
-        ret.write(0);
+        putShort(ret, 0);
 
         // attrib table length
-        ret.write(0);
-        ret.write(0);
+        putShort(ret, 0);
 
-        return ret.toByteArray();
+        return ret;
     }
 
-    private byte[] genCtor(boolean isStatic) {
-        byte[] ret = new byte[27];
+    private ByteArrayOutputStream genCtor(boolean isStatic) {
+        ByteArrayOutputStream ret = new ByteArrayOutputStream(27);
+
         short flags = 0;
         flags |= 0x0001; // PUBLIC
-        if (isStatic)
-            flags |= 0x0008; // STATIC
+        if (isStatic) flags |= 0x0008; // STATIC
         flags |= 0x1000; // SYNTHETIC
 
-        ret[0] = (byte) (flags >>> 8);
-        ret[1] = (byte) (flags);
+        putShort(ret, flags);
 
-        short nameIndex = findOrPut(new ConstantPoolEntry.Utf8(isStatic ? "<clinit>" : "<init>"));
-        ret[2] = (byte) (nameIndex >>> 8);
-        ret[3] = (byte) nameIndex;
+        // Name
+        putShort(ret, findOrPut(new ConstantPoolEntry.Utf8(isStatic ? "<clinit>" : "<init>")));
 
-        short descriptorIndex = findOrPut(new ConstantPoolEntry.Utf8("()V"));
-        ret[4] = (byte) (descriptorIndex >>> 8);
-        ret[5] = (byte) descriptorIndex;
+        // Descriptor
+        putShort(ret, findOrPut(new ConstantPoolEntry.Utf8("()V")));
 
         // Attribute count
-        ret[6] = 0;
-        ret[7] = 1;
+        putShort(ret, 1);
 
         // code attribute
-        short codeIndex = findOrPut(new ConstantPoolEntry.Utf8("Code"));
-        ret[8] = (byte) (codeIndex >>> 8);
-        ret[9] = (byte) codeIndex;
+        putShort(ret, findOrPut(new ConstantPoolEntry.Utf8("Code")));
 
         // code attribute attribute length (13 bytes below this one)
-        ret[10] = ret[11] = ret[12] = 0;
-        ret[13] = 13;
+        putInt(ret, isStatic ? 13 : 16); // need to call super if not static
 
         // max stack
-        ret[14] = ret[15] = 0;
+        putShort(ret, 0);
 
         // max locals
-        ret[16] = ret[17] = 0;
+        putShort(ret, isStatic ? 0 : 1); // need one local to store "this"
 
         // code length
-        ret[18] = ret[19] = ret[20] = 0;
-        ret[21] = 1;
+        putInt(ret, isStatic ? 1 : 4);
+
+        if (!isStatic) {
+            // aload_0
+            ret.write(0x2A);
+
+            // invokespecial
+            ret.write(0xB7);
+            putShort(ret, getMethodRef("java/lang/Object", "<init>", "()V"));
+        }
 
         // Return
-        ret[22] = (byte) 0xB1;
+        ret.write(0xB1);
 
         // exception table length
-        ret[23] = ret[24] = 0;
+        putShort(ret, 0);
 
         // attrib table length
-        ret[25] = ret[26] = 0;
+        putShort(ret, 0);
 
         return ret;
     }
@@ -317,7 +310,7 @@ public class Compiler {
         return null;
     }
 
-    private byte[] genMethod(Fun func) throws IOException {
+    private byte[] genMethod(Fun func) {
         ByteArrayOutputStream ret = new ByteArrayOutputStream();
 
         short flags = 0;
@@ -325,13 +318,12 @@ public class Compiler {
         flags |= 0x0008; // STATIC
         flags |= 0x1000; // SYNTHETIC
 
-        ret.write(flags >>> 8 & 0xFF);
-        ret.write(flags & 0xFF);
+        putShort(ret, flags);
 
         boolean mangle = func.name.equals("main");
         putShort(ret, findOrPut(new ConstantPoolEntry.Utf8((mangle ? "$" : "") + func.name)));
 
-        short descriptorIndex = findOrPut(new ConstantPoolEntry.Utf8("(" + String.join("", Collections.nCopies(func.formals.size(), "J")) + ")J"));
+        short descriptorIndex = findOrPut(new ConstantPoolEntry.Utf8("(" + String.join("", Collections.nCopies(func.formals.size(), "I")) + ")I"));
         putShort(ret, descriptorIndex);
 
         // Attribute count
@@ -340,30 +332,24 @@ public class Compiler {
         // code attribute
         putShort(ret, findOrPut(new ConstantPoolEntry.Utf8("Code")));
 
-        byte[] code = fun(func).toByteArray();
+        ByteArrayOutputStream code = fun(func);
 
         // code attribute attribute length (12 + codeLength)
-        int codeAttribLength = 12 + code.length;
-        ret.write(codeAttribLength >>> 24 & 0xFF);
-        ret.write(codeAttribLength >>> 16 & 0xFF);
-        ret.write(codeAttribLength >>> 8 & 0xFF);
-        ret.write(codeAttribLength & 0xFF);
+        int codeAttribLength = 12 + code.size();
+        putInt(ret, codeAttribLength);
 
         // max stack
-        short maxStack = 0; // todo ??? Longs take double space on the stack
+        short maxStack = (short) maxStackTracker.stream().mapToInt(Integer::intValue).max().orElse(0);
         putShort(ret, maxStack);
 
         // max locals
         putShort(ret, func.formals.size());
 
         // code length
-        ret.write(code.length >>> 24 & 0xFF);
-        ret.write(code.length >>> 16 & 0xFF);
-        ret.write(code.length >>> 8 & 0xFF);
-        ret.write(code.length & 0xFF);
+        putInt(ret, code.size());
 
         // code
-        ret.write(code);
+        append(ret, code);
 
         // exception table length
         putShort(ret, 0);
@@ -374,10 +360,38 @@ public class Compiler {
         return ret.toByteArray();
     }
 
+    private final List<Integer> maxStackTracker = new ArrayList<>();
+    private int curStack = 0;
+
+    private void pushed() {
+        pushed(1);
+    }
+
+    private void popped() {
+        popped(1);
+    }
+
+    private void pushed(int count) {
+        curStack += count;
+        maxStackTracker.add(curStack);
+    }
+
+    private void popped(int count) {
+        curStack -= count;
+        if (curStack < 0)
+            throw new CompileException("WTF");
+        maxStackTracker.add(curStack);
+    }
+
     private ByteArrayOutputStream fun(Fun fun) {
+        maxStackTracker.clear();
+        curStack = 0;
+
         ByteArrayOutputStream ret = statement(fun, fun.body);
-        ret.write(0x09); // lconst_0
-        ret.write(0xAD); // lreturn
+        ret.write(0x03); // iconst_0
+        pushed();
+        ret.write(0xAC); // ireturn
+        popped();
         return ret;
     }
 
@@ -385,9 +399,8 @@ public class Compiler {
         switch (s.kind) {
             case BLOCK: {
                 ByteArrayOutputStream ret = new ByteArrayOutputStream();
-                for (Statement sub : ((Statement.Block) s).block) {
+                for (Statement sub : ((Statement.Block) s).block)
                     append(ret, statement(fun, sub));
-                }
                 return ret;
             }
             case ASSIGNMENT: {
@@ -399,24 +412,43 @@ public class Compiler {
                     // putstatic
                     globalVars.add(assign.assignName);
                     ret.write(0xB3);
-                    getFieldRef(className, assign.assignName, "J");
+                    putShort(ret, getFieldRef(className, assign.assignName, "I"));
                 } else {
-                    // lstore
-                    ret.write(0x37);
-                    putShort(ret, 2 * fun.formals.indexOf(assign.assignName) + 1); // longs take double space in lv array
+                    int storeIndex = fun.formals.indexOf(assign.assignName);
+                    switch (storeIndex) {
+                        case 0: ret.write(0x3B); break; // istore_0
+                        case 1: ret.write(0x3C); break; // istore_1
+                        case 2: ret.write(0x3D); break; // istore_2
+                        case 3: ret.write(0x3E); break; // istore_3
+                        default: {
+                            // istore
+                            ret.write(0x36);
+                            ret.write((byte) storeIndex);
+                            break;
+                        }
+                    }
                 }
+                popped();
                 return ret;
             }
             case PRINT: {
                 ByteArrayOutputStream ret = expression(fun, ((Statement.Print) s).printValue);
 
+                // invokestatic
+                ret.write(0xB8);
+                putShort(ret, getMethodRef("java/lang/Integer", "toUnsignedString", "(I)Ljava/lang/String;"));
+                popped();
+                pushed();
+
                 // getstatic System.out
                 ret.write(0xB2);
                 putShort(ret, getFieldRef("java/lang/System", "out", "Ljava/io/PrintStream;"));
+                pushed();
 
                 // invokevirtual
                 ret.write(0xB6);
-                putShort(ret, getMethodRef("java/io/PrintStream", "println", "(J)V"));
+                putShort(ret, getMethodRef("java/io/PrintStream", "println", "(Ljava/lang/String;)V"));
+                popped(2);
 
                 return ret;
             }
@@ -428,9 +460,9 @@ public class Compiler {
 
                 ByteArrayOutputStream ret = new ByteArrayOutputStream();
                 append(ret, ifCondition);
-                ret.write(); // ifne, jump to true branch
+                // todo ret.write(); // ifne, jump to true branch
                 append(ret, elseBranch);
-                ret.write(); // jump over true branch
+                // todo ret.write(); // jump over true branch
                 append(ret, trueBranch);
 
                 return ret;
@@ -442,23 +474,24 @@ public class Compiler {
 
                 ByteArrayOutputStream ret = new ByteArrayOutputStream();
                 append(ret, whileCondition);
-                ret.write(); // ifeq, jump over body and loopback
+                // todo ret.write(); // ifeq, jump over body and loopback
                 append(ret, whileBody);
-                ret.write(); // Loopback to condition check
+                // todo ret.write(); // Loopback to condition check
 
                 return ret;
             }
             case RETURN: {
                 Statement.Return retStatement = ((Statement.Return) s);
                 ByteArrayOutputStream ret = expression(fun, retStatement.returnValue);
-                ret.write(0xAD); // lreturn
+                ret.write(0xAC); // ireturn
+                popped();
                 return ret;
             }
             default: throw new CompileException("Unknown statement type: " + s);
         }
     }
 
-    // Postcondition of bytes: Expression result value (long) is on top of stack after completion
+    // Postcondition of bytes: Expression result value (int) is on top of stack after completion
     private ByteArrayOutputStream expression(Fun fun, Expression e) {
         switch (e.kind) {
             case VAR: {
@@ -470,34 +503,54 @@ public class Compiler {
                     globalVars.add(varExp.varName);
                     // getstatic
                     ret.write(0xB2);
-                    getFieldRef(className, varExp.varName, "J");
+                    putShort(ret, getFieldRef(className, varExp.varName, "I"));
                 } else {
-                    // lload
-                    ret.write(0x16);
-                    putShort(ret, 2 * fun.formals.indexOf(varExp.varName) + 1); // longs take double space in lv array
+                    int loadIndex = fun.formals.indexOf(varExp.varName);
+                    switch (loadIndex) {
+                        case 0: ret.write(0x1A); break; // iload_0
+                        case 1: ret.write(0x1B); break; // iload_1
+                        case 2: ret.write(0x1C); break; // iload_2
+                        case 3: ret.write(0x1D); break; // iload_3
+                        default: {
+                            // iload
+                            ret.write(0x15);
+                            ret.write((byte) loadIndex);
+
+                            break;
+                        }
+                    }
                 }
+
+                pushed();
                 return ret;
             }
             case VAL: {
                 Expression.Val valExp = ((Expression.Val) e);
                 ByteArrayOutputStream ret = new ByteArrayOutputStream();
 
-                if (valExp.value_unsigned == 0)
-                    ret.write(0x09); // lconst_0
-                else if (valExp.value_unsigned == 1)
-                    ret.write(0x0A); // lconst_1
-                else {
-                    // put into constant pool
-                    short index = findOrPut(new ConstantPoolEntry.Long(valExp.value_unsigned));
+                switch (valExp.value_unsigned) {
+                    case 0: ret.write(0x3); break;
+                    case 1: ret.write(0x4); break;
+                    case 2: ret.write(0x5); break;
+                    case 3: ret.write(0x6); break;
+                    case 4: ret.write(0x7); break;
+                    case 5: ret.write(0x8); break;
+                    default: {
+                        // put into constant pool
+                        short index = findOrPut(new ConstantPoolEntry.Int(valExp.value_unsigned));
 
-                    // ldc
-                    ret.write(0x14);
-                    ret.write(index >>> 8 & 0xFF);
-                    ret.write(index & 0xFF);
+                        // ldc
+                        ret.write(0x14);
+                        putShort(ret, index);
+
+                        break;
+                    }
                 }
 
+                pushed();
                 return ret;
             }
+
             case PLUS:
             case MUL:
             case EQ:
@@ -512,16 +565,20 @@ public class Compiler {
                 append(ret, left);
                 append(ret, right);
 
-                if (e.kind == ExpressionType.PLUS)
-                    ret.write(0x61); // ladd
-                else if (e.kind == ExpressionType.MUL)
-                    ret.write(0x69); // lmul
-                else {
-                    // Long.compareUnsigned(long, long): int
+                if (e.kind == ExpressionType.PLUS) {
+                    ret.write(0x60); // iadd
+                    popped(2);
+                    pushed();
+                } else if (e.kind == ExpressionType.MUL) {
+                    ret.write(0x68); // imul
+                    popped(2);
+                    pushed();
+                } else {
+                    // Integer.compareUnsigned(int, int): int
 
                     // invokestatic
                     ret.write(0xB8);
-                    putShort(ret, getMethodRef("java/lang/Long", "compareUnsigned", "(JJ)I"));
+                    putShort(ret, getMethodRef("java/lang/Integer", "compareUnsigned", "(II)I"));
                 }
 
                 return ret;
@@ -542,7 +599,10 @@ public class Compiler {
 
                 // invokestatic
                 ret.write(0xB8);
-                putShort(ret, getMethodRef(className, call.callName, "(" + String.join("", Collections.nCopies(call.callActuals.size(), "J")) + ")J"));
+                putShort(ret, getMethodRef(className, call.callName, "(" + String.join("", Collections.nCopies(receiver.formals.size(), "I")) + ")I"));
+
+                popped(receiver.formals.size());
+                pushed();
 
                 return ret;
             }
@@ -551,8 +611,12 @@ public class Compiler {
     }
 
     private static void append(ByteArrayOutputStream baos, ByteArrayOutputStream toAppend) {
+        append(baos, toAppend.toByteArray());
+    }
+
+    private static void append(ByteArrayOutputStream baos, byte[] toAppend) {
         try {
-            baos.write(toAppend.toByteArray());
+            baos.write(toAppend);
         } catch (IOException e) {
             throw new RuntimeException(e); // Impossible
         }
