@@ -362,7 +362,7 @@ public class Compiler {
         putShort(ret, findOrPut(new ConstantPoolEntry.Utf8("Code")));
 
         // code attribute attribute length (13 bytes below this one)
-        putInt(ret, isStatic ? 13 : 16); // need to call super if not static
+        putInt(ret, isStatic ? 13 : 17); // need to call super if not static
 
         // max stack
         putShort(ret, 0);
@@ -371,7 +371,7 @@ public class Compiler {
         putShort(ret, isStatic ? 0 : 1); // need one local to store "this"
 
         // code length
-        putInt(ret, isStatic ? 1 : 4);
+        putInt(ret, isStatic ? 1 : 5);
 
         if (!isStatic) {
             // aload_0
