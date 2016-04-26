@@ -7,6 +7,12 @@ public class DECOMPILEME {
         System.out.println("HI!");
     }
 
+    public static boolean boolTest(int param) {
+        if (param == 0)
+            return false;
+        return true;
+    }
+
     /*public static long GLOBALVARONE = 1;
     public static long GLOBALVARTWO = 2;
     public static long GLOBALVARTHREE = 3;

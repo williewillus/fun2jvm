@@ -16,6 +16,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import static vlee12.parser.ExpressionType.EQ;
+import static vlee12.parser.ExpressionType.GT;
+import static vlee12.parser.ExpressionType.LT;
+import static vlee12.parser.ExpressionType.NE;
+
 public class Compiler {
     public static byte[] compile(List<Fun> funs, String className) {
         return new Compiler(funs, className).genHex();
@@ -104,6 +109,9 @@ public class Compiler {
         
         ByteArrayOutputStream clinit = genCtor(true);
         ByteArrayOutputStream init = genCtor(false);
+        ByteArrayOutputStream isEq = genConditionalHelper(EQ);
+        ByteArrayOutputStream isLt = genConditionalHelper(LT);
+        ByteArrayOutputStream isGt = genConditionalHelper(GT);
         ByteArrayOutputStream mainMethod = genMainMethod(mainFunArgCount);
         
         // -- Actual file -- //
@@ -151,13 +159,17 @@ public class Compiler {
         }
 
         // method count
-        putShort(bytes, funHex.size() + 3);
-        System.out.printf("Added %d methods %n", funHex.size() + 3);
+        putShort(bytes, funHex.size() + 6);
+        System.out.printf("Added %d methods %n", funHex.size() + 6);
 
         // methods
         append(bytes, clinit);
         append(bytes, init);
         append(bytes, mainMethod);
+
+        append(bytes, isGt);
+        append(bytes, isLt);
+        append(bytes, isEq);
 
         for (byte[] arr : funHex) {
             append(bytes, arr);
@@ -168,7 +180,7 @@ public class Compiler {
         return bytes.toByteArray();
     }
 
-    private byte[] genGlobalVar(String name) {
+    private ByteArrayOutputStream genGlobalVar(String name) {
         ByteArrayOutputStream ret = new ByteArrayOutputStream(8);
         short flags = 0;
         flags |= 0x0002; // PRIVATE
@@ -185,11 +197,11 @@ public class Compiler {
         // No attributes
         putShort(ret, 0);
 
-        return ret.toByteArray();
+        return ret;
     }
 
     private ByteArrayOutputStream genMainMethod(int mainFunArgCount) {
-        ByteArrayOutputStream ret = new ByteArrayOutputStream();
+        ByteArrayOutputStream ret = new ByteArrayOutputStream(38);
         
         short flags = 0;
         flags |= 0x0001; // PUBLIC
@@ -245,6 +257,88 @@ public class Compiler {
         return ret;
     }
 
+    private ByteArrayOutputStream genConditionalHelper(ExpressionType type) {
+        if (type != LT && type != GT && type != EQ)
+            throw new CompileException("Invalid expression type passed into genCondtionalHelper");
+
+        ByteArrayOutputStream ret = new ByteArrayOutputStream();
+
+        short flags = 0;
+        flags |= 0x0002; // PRIVATE
+        flags |= 0x0008; // STATIC
+        flags |= 0x1000; // SYNTHETIC
+
+        putShort(ret, flags);
+
+        String mName = "$";
+        switch (type) {
+            case LT: mName += "isLt"; break;
+            case GT: mName += "isGt"; break;
+            case EQ: mName += "isEq"; break;
+        }
+
+        putShort(ret, findOrPut(new ConstantPoolEntry.Utf8(mName)));
+
+        short descriptorIndex = findOrPut(new ConstantPoolEntry.Utf8("(II)I"));
+        putShort(ret, descriptorIndex);
+
+        // Attribute count
+        putShort(ret, 1);
+
+        // code attribute
+        putShort(ret, findOrPut(new ConstantPoolEntry.Utf8("Code")));
+
+        // code attribute attribute length (12 + codeLength)
+        int codeAttribLength = 12 + 12;
+        putInt(ret, codeAttribLength);
+
+        // max stack
+        putShort(ret, 2);
+
+        // max locals
+        putShort(ret, 2);
+
+        // code length
+        putInt(ret, 12);
+
+        // code
+
+        // invokestatic
+        ret.write(0xB8);
+        putShort(ret, getMethodRef("java/lang/Integer", "compareUnsigned", "(II)I"));
+
+        // ifCC branch forward from this byte to iconst_1
+        int insn = 0;
+        switch (type) {
+            case LT: insn = 0x9B; break; // iflt
+            case GT: insn = 0x9D; break; // ifgt
+            case EQ: insn = 0x99; break; // ifeq
+        }
+        ret.write(insn);
+        putShort(ret, 7);
+
+        // iconst_0
+        ret.write(0x03);
+
+        // goto over the iconst_1
+        ret.write(0xA7);
+        putShort(ret, 4);
+
+        // iconst_1
+        ret.write(0x04);
+
+        // ireturn
+        ret.write(0xAC);
+
+        // exception table length
+        putShort(ret, 0);
+
+        // attrib table length
+        putShort(ret, 0);
+
+        return ret;
+    }
+
     private ByteArrayOutputStream genCtor(boolean isStatic) {
         ByteArrayOutputStream ret = new ByteArrayOutputStream(27);
 
@@ -288,7 +382,7 @@ public class Compiler {
             putShort(ret, getMethodRef("java/lang/Object", "<init>", "()V"));
         }
 
-        // Return
+        // return
         ret.write(0xB1);
 
         // exception table length
@@ -379,7 +473,7 @@ public class Compiler {
     private void popped(int count) {
         curStack -= count;
         if (curStack < 0)
-            throw new CompileException("WTF");
+            throw new CompileException("Pop tracker went below 0");
         maxStackTracker.add(curStack);
     }
 
@@ -460,9 +554,16 @@ public class Compiler {
 
                 ByteArrayOutputStream ret = new ByteArrayOutputStream();
                 append(ret, ifCondition);
-                // todo ret.write(); // ifne, jump to true branch
+
+                // ifne, jump over elseBranch
+                ret.write(0x9A);
+                putShort(ret, (2 + elseBranch.size() + 3) + 1); // These two bytes + else branch code + goto at end of else branch
+
                 append(ret, elseBranch);
-                // todo ret.write(); // jump over true branch
+                // goto over true branch
+                ret.write(0xA7);
+                putShort(ret, (2 + trueBranch.size()) + 1); // These two bytes + true branch code
+
                 append(ret, trueBranch);
 
                 return ret;
@@ -474,9 +575,14 @@ public class Compiler {
 
                 ByteArrayOutputStream ret = new ByteArrayOutputStream();
                 append(ret, whileCondition);
-                // todo ret.write(); // ifeq, jump over body and loopback
+                // ifeq jump over body
+                ret.write(0x99);
+                putShort(ret, (2 + whileBody.size() + 3) + 1); // These two bytes + body code + loopback
+
                 append(ret, whileBody);
-                // todo ret.write(); // Loopback to condition check
+                // goto back to condition check
+                ret.write(0xA7);
+                putShort(ret, -(whileBody.size() + 3 + whileCondition.size()));
 
                 return ret;
             }
@@ -574,11 +680,30 @@ public class Compiler {
                     popped(2);
                     pushed();
                 } else {
-                    // Integer.compareUnsigned(int, int): int
-
                     // invokestatic
                     ret.write(0xB8);
-                    putShort(ret, getMethodRef("java/lang/Integer", "compareUnsigned", "(II)I"));
+                    String callName;
+
+                    switch (e.kind) {
+                        case LT: callName = "$isLt"; break;
+                        case GT: callName = "$isGt"; break;
+                        case EQ:
+                        case NE: callName = "$isEq"; break;
+                        default: callName = "PANIC_IF_THIS_APPEARS"; break;
+                    }
+
+                    putShort(ret, getMethodRef(className, callName, "(II)I"));
+                    popped(2);
+                    pushed();
+
+                    // If NE, invert result of call to $isEq()
+                    if (e.kind == NE) {
+                        ret.write(0x04); // iconst_1
+                        pushed();
+                        ret.write(0x82); // ixor (flips 1-0 and vice versa)
+                        popped(2);
+                        pushed();
+                    }
                 }
 
                 return ret;
