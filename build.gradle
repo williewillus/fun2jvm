@@ -10,7 +10,21 @@ jar {
     }
 }
 
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testCompile group: 'junit', name: 'junit', version: '4.11'
+}
+
 compileJava {
     sourceCompatibility = 1.8
     targetCompatibility = 1.8
+}
+
+test {
+    // This is a class instantiated multiple times by our suite,
+    // don't try to run it alone
+    exclude 'vlee12/test/FunTest.class'
 }

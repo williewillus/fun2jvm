@@ -129,7 +129,6 @@ public class Compiler {
 
         // Constant pool size
         putShort(bytes, constantPoolEntries.size() + 1);
-        System.out.printf("Added %d constant pool entries %n", constantPoolEntries.size());
 
         // Constant pool
         for (ConstantPoolEntry e : constantPoolEntries) {
@@ -154,7 +153,6 @@ public class Compiler {
 
         // field count
         putShort(bytes, globalVars.size());
-        System.out.printf("Added %d vars %n", globalVars.size());
 
         // fields
         for (String var : globalVars) {
@@ -163,7 +161,6 @@ public class Compiler {
 
         // method count
         putShort(bytes, funHex.size() + 6);
-        System.out.printf("Added %d methods %n", funHex.size() + 6);
 
         // methods
         append(bytes, clinit);
@@ -562,21 +559,26 @@ public class Compiler {
             }
             case IF: {
                 Statement.If ifStatement = ((Statement.If) s);
+
+                boolean noElse = ((Statement.If) s).ifElse == null;
+
                 ByteArrayOutputStream ifCondition = expression(fun, ifStatement.ifCondition);
                 ByteArrayOutputStream trueBranch = statement(fun, ifStatement.ifThen);
-                ByteArrayOutputStream elseBranch = statement(fun, ifStatement.ifElse);
+                ByteArrayOutputStream elseBranch = noElse ? null : statement(fun, ifStatement.ifElse);
 
                 ByteArrayOutputStream ret = new ByteArrayOutputStream();
                 append(ret, ifCondition);
 
                 // ifne, jump over elseBranch
                 ret.write(0x9A);
-                putShort(ret, (2 + elseBranch.size() + 3) + 1); // These two bytes + else branch code + goto at end of else branch
+                putShort(ret, 2 + (noElse ? 0 : elseBranch.size() + 3) + 1); // These two bytes + else branch code + goto at end of else branch
 
-                append(ret, elseBranch);
-                // goto over true branch
-                ret.write(0xA7);
-                putShort(ret, (2 + trueBranch.size()) + 1); // These two bytes + true branch code
+                if (!noElse) {
+                    append(ret, elseBranch);
+                    // goto over true branch
+                    ret.write(0xA7);
+                    putShort(ret, (2 + trueBranch.size()) + 1); // These two bytes + true branch code
+                }
 
                 append(ret, trueBranch);
 

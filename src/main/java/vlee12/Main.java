@@ -15,7 +15,7 @@ import java.util.List;
 
 public class Main {
 
-    public static void main(String[] args) {
+    public static void main(String... args) {
         if (args.length == 0)
             System.err.println("Need input file!");
         else if (validateArgs(args)) {
