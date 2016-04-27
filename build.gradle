@@ -1,6 +1,7 @@
 apply plugin: 'java'
 
 archivesBaseName = "fun2jvm"
+defaultTasks 'clean', 'build', 'test'
 
 jar {
     manifest {

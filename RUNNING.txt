@@ -1,3 +1,21 @@
 Please include clear and simple instructions for running your project.
 
+I include a Gradle build script for compiling this project.
+
+To clear: ./gradlew clean
+To build a jar in build/libs: ./gradlew build
+To run the compiler (outputs a .class in the same directory as .fun): 
+    java -jar build/libs/fun2jvm.jar <path-to-fun-file>
+To run all detected tests: ./gradlew test
+
+Simply executing ./gradlew will run clean, build, and test in that order.
+
 Explain why your supplied tests illustrate that your project works
+The 16 tests provided alongside p5 are reused for this project. The goal is 
+that the output is the same as that produced by p5. That is, the output is 
+that same as the .ok file of the same name. I achieve that goal in this project.
+
+Extra .fun and .ok can be placed in the root directory and will be picked up
+by the test code. .fun's without .ok files will not be run.
+I'd be interested in seeing how my project fares on the hidden p5 tests, I'm fairly
+certain that it will pass the rest, but I want to know if it doesn't. 
