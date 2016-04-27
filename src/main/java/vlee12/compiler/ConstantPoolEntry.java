@@ -19,12 +19,12 @@ abstract class ConstantPoolEntry {
 
         private final byte[] ret;
 
-        Utf8(java.lang.String data) throws CompileException {
+        Utf8(java.lang.String data) {
             super(EntryType.UTF8);
 
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(bytes);
-            // Writes using JVM's "modified UTF8"
+            // Writes using JVM's "modified UTF8" format
             try {
                 out.writeUTF(data);
             } catch (IOException e) {
@@ -35,7 +35,9 @@ abstract class ConstantPoolEntry {
             ret[0] = type.id;
             ret[1] = (byte) ((bytes.size() - 2) >>> 8);
             ret[2] = (byte) (bytes.size() - 2);
-            System.arraycopy(bytes.toByteArray(), 2, ret, 3, bytes.size() - 2); // Skip 2 length bytes at beginning
+
+            // DataOutputStream adds the length of the string as two bytes at the start, skip those.
+            System.arraycopy(bytes.toByteArray(), 2, ret, 3, bytes.size() - 2);
         }
 
         @Override

@@ -37,6 +37,11 @@ public class Compiler {
         this.className = name;
     }
 
+    /**
+     * Finds the index of a constant pool entry equivalent to the one given,
+     * or makes a new one and returns its index
+     * Note that the index is +1 from expected, because the JVM indexes the Constant Pool using [1, size]
+     */
     private short findOrPut(ConstantPoolEntry entry) {
         int index = constantPoolEntries.indexOf(entry);
         short ret = 0;
@@ -50,12 +55,14 @@ public class Compiler {
         return ret;
     }
 
+    // Variant of above for Class Constant Pool Entries
     private short getClassConstant(String name) {
         short entryIndex = findOrPut(new ConstantPoolEntry.Utf8(name));
         constantPoolEntries.add(new ConstantPoolEntry.Class(entryIndex));
         return ((short) constantPoolEntries.size());
     }
 
+    // Variant of above for Method Constant Pool Entries
     private short getMethodRef(String ownerClass, String methodName, String methodDesc) {
         short callNameIndex = findOrPut(new ConstantPoolEntry.Utf8(methodName));
         short callNameDescriptorIndex = findOrPut(new ConstantPoolEntry.Utf8(methodDesc));
@@ -65,6 +72,7 @@ public class Compiler {
         return findOrPut(new ConstantPoolEntry.Method(classIndex, callNameAndTypeIndex));
     }
 
+    // Variant of above for Field Constant Pool Entries
     private short getFieldRef(String ownerClass, String fieldName, String fieldDesc) {
         short callNameIndex = findOrPut(new ConstantPoolEntry.Utf8(fieldName));
         short callNameDescriptorIndex = findOrPut(new ConstantPoolEntry.Utf8(fieldDesc));
@@ -73,6 +81,9 @@ public class Compiler {
 
         return findOrPut(new ConstantPoolEntry.Field(classIndex, callNameAndTypeIndex));
     }
+
+    // Helpers to write larger types or other ByteArrayOutputStreams
+    // to a ByteArrayOutputStream, without casting and catching everywhere
 
     private void putInt(ByteArrayOutputStream bytes, int intToPut) {
         bytes.write(intToPut >>> 24 & 0xFF);
@@ -86,10 +97,25 @@ public class Compiler {
         bytes.write(shortToPut & 0xFF);
     }
 
+    private static void append(ByteArrayOutputStream baos, ByteArrayOutputStream toAppend) {
+        append(baos, toAppend.toByteArray());
+    }
+
+    private static void append(ByteArrayOutputStream baos, byte[] toAppend) {
+        try {
+            baos.write(toAppend);
+        } catch (IOException e) {
+            throw new IllegalStateException(e); // Impossible
+        }
+    }
+
     private byte[] genHex() {
-        // -- Setup -- //
+        /* -- Setup -- */
         short thisClassIndex = getClassConstant(className);
         short superClassIndex = getClassConstant("java/lang/Object");
+
+        /* -- Generate code for all methods -- */
+        // This is done up here so the constant pool is populated
 
         List<byte[]> funHex = new ArrayList<>();
         boolean foundMain = false;
@@ -106,19 +132,21 @@ public class Compiler {
         if (!foundMain) {
             throw new CompileException("No main fun found");
         }
-        
+
+        // Generate code for class initializer, empty constructor, and entry point
         ByteArrayOutputStream clinit = genCtor(true);
         ByteArrayOutputStream init = genCtor(false);
+        ByteArrayOutputStream mainMethod = genMainMethod(mainFunArgCount);
+
+        // Generate code for comparison helpers. This is because there is no "icmp" instruction in JVM. See report.
         ByteArrayOutputStream isEq = genConditionalHelper(EQ);
         ByteArrayOutputStream isLt = genConditionalHelper(LT);
         ByteArrayOutputStream isGt = genConditionalHelper(GT);
-        ByteArrayOutputStream mainMethod = genMainMethod(mainFunArgCount);
-        
-        // -- Actual file -- //
+
+        /* -- Actual file -- */
 
         // Magic header for class files
-        putShort(bytes, 0xCAFE);
-        putShort(bytes, 0xBABE);
+        putInt(bytes, 0xCAFEBABE);
 
         // Compiling for JVM 6u0 (version 50.0)
         putShort(bytes, 0);    // minor 0
@@ -139,10 +167,10 @@ public class Compiler {
         flags |= 0x1000; // SYNTHETIC
         putShort(bytes, flags);
 
-        // this class
+        // what is this class
         putShort(bytes, thisClassIndex);
 
-        // superclass
+        // who is the superclass
         putShort(bytes, superClassIndex);
 
         // interface count and no interfaces
@@ -197,6 +225,10 @@ public class Compiler {
         return ret;
     }
 
+    /**
+     * Generates the true main method.
+     * Simply pushes a number of 0's matching the formal argument count of the fun main function (now mangled to $main), then invokes it.
+     */
     private ByteArrayOutputStream genMainMethod(int mainFunArgCount) {
         ByteArrayOutputStream ret = new ByteArrayOutputStream(38);
         
@@ -225,17 +257,18 @@ public class Compiler {
         putInt(ret, codeAttribLength);
 
         // max stack
-        putShort(ret, mainFunArgCount);
+        putShort(ret, mainFunArgCount); // pushing 0's
 
         // max locals
-        putShort(ret, 1);
+        putShort(ret, 1); // args parameter
 
         // code length
         int codeLength = mainFunArgCount + 5; // Push args (n) + invokestatic (3) + pop (1) + return (1)
         putInt(ret, codeLength);
 
         for (int i = 0; i < mainFunArgCount; i++) {
-            ret.write(0x03); // iconst_0
+            // iconst_0
+            ret.write(0x03);
         }
 
         // invokestatic
@@ -257,6 +290,12 @@ public class Compiler {
         return ret;
     }
 
+    /**
+     * Generates a conditional helper.
+     * This provides a bridge between Java's compareTo-style semantics and C's zero-nonzero semantics.
+     * The conditional helper takes two ints and calls Integer.compareUnsiged, which returns -1, 0, or 1
+     * The helper than translates that into a 1 (true) or 0 (false) value based on the ExpressionType being generated.
+     */
     private ByteArrayOutputStream genConditionalHelper(ExpressionType type) {
         if (type != LT && type != GT && type != EQ)
             throw new CompileException("Invalid expression type passed into genCondtionalHelper");
@@ -345,6 +384,10 @@ public class Compiler {
         return ret;
     }
 
+    /**
+     * Generates the constructor or static initializer.
+     * Nothing particularly interesting happens here.
+     */
     private ByteArrayOutputStream genCtor(boolean isStatic) {
         ByteArrayOutputStream ret = new ByteArrayOutputStream(27);
 
@@ -371,7 +414,7 @@ public class Compiler {
         putInt(ret, isStatic ? 13 : 17); // need to call super if not static
 
         // max stack
-        putShort(ret, 0);
+        putShort(ret, isStatic ? 0 : 1); // need one to load "this" before calling super
 
         // max locals
         putShort(ret, isStatic ? 0 : 1); // need one local to store "this"
@@ -414,12 +457,13 @@ public class Compiler {
         ByteArrayOutputStream ret = new ByteArrayOutputStream();
 
         short flags = 0;
-        flags |= 0x0001; // PUBLIC
+        flags |= 0x0002; // PRIVATE
         flags |= 0x0008; // STATIC
         flags |= 0x1000; // SYNTHETIC
 
         putShort(ret, flags);
 
+        // If this is the main function, mangle the name by prepending "$"
         boolean mangle = func.name.equals("main");
         putShort(ret, findOrPut(new ConstantPoolEntry.Utf8((mangle ? "$" : "") + func.name)));
 
@@ -460,6 +504,14 @@ public class Compiler {
         return ret.toByteArray();
     }
 
+    /**
+     * This is a semi-cheaty way to try to find out how deep the stack goes during this method call,
+     * without implementing the advanced data and control flow analysis that javac has.
+     * Whenever bytecode is generated that pushes or pops from the stack these methods are called and the number stored.
+     * The maximum value is found and used (above).
+     * It's primitive and should prefer to overestimate, and thus should be safe.
+     */
+
     private final List<Integer> maxStackTracker = new ArrayList<>();
     private int curStack = 0;
 
@@ -488,10 +540,16 @@ public class Compiler {
         curStack = 0;
 
         ByteArrayOutputStream ret = statement(fun, fun.body);
-        ret.write(0x03); // iconst_0
+
+
+        // Implicit return 0 at end
+        // iconst_0
+        ret.write(0x03);
         pushed();
-        ret.write(0xAC); // ireturn
+        // ireturn
+        ret.write(0xAC);
         popped();
+
         return ret;
     }
 
@@ -507,7 +565,9 @@ public class Compiler {
                 Statement.Assign assign = ((Statement.Assign) s);
                 boolean global = !fun.formals.contains(assign.assignName);
                 ByteArrayOutputStream ret = new ByteArrayOutputStream();
+
                 append(ret, expression(fun, assign.assignValue));
+
                 if (global) {
                     // putstatic
                     globalVars.add(assign.assignName);
@@ -528,6 +588,7 @@ public class Compiler {
                         }
                     }
                 }
+
                 popped();
                 return ret;
             }
@@ -562,6 +623,7 @@ public class Compiler {
                 ByteArrayOutputStream elseBranch = ifStatement.ifElse == null ? new ByteArrayOutputStream(0) : statement(fun, ifStatement.ifElse);
 
                 ByteArrayOutputStream ret = new ByteArrayOutputStream();
+
                 append(ret, ifCondition);
 
                 // ifne, jump over elseBranch
@@ -569,7 +631,10 @@ public class Compiler {
                 putShort(ret, (2 + elseBranch.size() + 3) + 1); // These two bytes + else branch code + goto at end of else branch
 
                 append(ret, elseBranch);
+
                 // goto over true branch
+                // We generate these even if there is no else branch specified in fun code (elseBranch has size 0)
+                // A minor optimization could be applied here to remove a useless goto.
                 ret.write(0xA7);
                 putShort(ret, (2 + trueBranch.size()) + 1); // These two bytes + true branch code
 
@@ -581,24 +646,27 @@ public class Compiler {
                 Statement.While whileStatement = ((Statement.While) s);
                 ByteArrayOutputStream whileCondition = expression(fun, whileStatement.whileCondition);
                 ByteArrayOutputStream whileBody = statement(fun, whileStatement.whileBody);
-
                 ByteArrayOutputStream ret = new ByteArrayOutputStream();
+
                 append(ret, whileCondition);
+
                 // ifeq jump over body
                 ret.write(0x99);
                 putShort(ret, (2 + whileBody.size() + 3) + 1); // These two bytes + body code + loopback
 
                 append(ret, whileBody);
+
                 // goto back to condition check
                 ret.write(0xA7);
-                putShort(ret, -(whileBody.size() + 3 + whileCondition.size()));
+                putShort(ret, -(whileBody.size() + 3 + whileCondition.size())); // Back over body + two bytes from if check + conditional
 
                 return ret;
             }
             case RETURN: {
                 Statement.Return retStatement = ((Statement.Return) s);
                 ByteArrayOutputStream ret = expression(fun, retStatement.returnValue);
-                ret.write(0xAC); // ireturn
+                // ireturn
+                ret.write(0xAC);
                 popped();
                 return ret;
             }
@@ -606,7 +674,12 @@ public class Compiler {
         }
     }
 
-    // Postcondition of bytes: Expression result value (int) is on top of stack after completion
+    /**
+     * Postcondition of executing the bytecode produced by this method:
+     *     Expression result value (int) is on top of stack after completion
+     *     No extra elements on stack
+     */
+
     private ByteArrayOutputStream expression(Fun fun, Expression e) {
         switch (e.kind) {
             case VAR: {
@@ -644,12 +717,12 @@ public class Compiler {
                 ByteArrayOutputStream ret = new ByteArrayOutputStream();
 
                 switch (valExp.value_unsigned) {
-                    case 0: ret.write(0x3); break;
-                    case 1: ret.write(0x4); break;
-                    case 2: ret.write(0x5); break;
-                    case 3: ret.write(0x6); break;
-                    case 4: ret.write(0x7); break;
-                    case 5: ret.write(0x8); break;
+                    case 0: ret.write(0x3); break; // iconst_0
+                    case 1: ret.write(0x4); break; // iconst_1
+                    case 2: ret.write(0x5); break; // iconst_2
+                    case 3: ret.write(0x6); break; // iconst_3
+                    case 4: ret.write(0x7); break; // iconst_4
+                    case 5: ret.write(0x8); break; // iconst_5
                     default: {
                         // put into constant pool
                         short index = findOrPut(new ConstantPoolEntry.Int(valExp.value_unsigned));
@@ -689,7 +762,7 @@ public class Compiler {
                     popped(2);
                     pushed();
                 } else {
-                    // invokestatic
+                    // invokestatic our condtional helpers
                     ret.write(0xB8);
                     String callName;
 
@@ -707,9 +780,11 @@ public class Compiler {
 
                     // If NE, invert result of call to $isEq()
                     if (e.kind == NE) {
-                        ret.write(0x04); // iconst_1
+                        // iconst_1
+                        ret.write(0x04);
                         pushed();
-                        ret.write(0x82); // ixor (flips 1-0 and vice versa)
+                        // ixor by 1 (flips 1-0 and vice versa)
+                        ret.write(0x82);
                         popped(2);
                         pushed();
                     }
@@ -726,7 +801,8 @@ public class Compiler {
                     throw new CompileException("Not enough arguments");
 
                 ByteArrayOutputStream ret = new ByteArrayOutputStream();
-                // actuals guaranteed >= formals. Extra actuals ignored at compile time.
+
+                // actuals guaranteed to be >= formals vua above. Extra actuals ignored at compile time.
                 for (int i = 0; i < receiver.formals.size(); i++) {
                     append(ret, expression(fun, call.callActuals.get(i)));
                 }
@@ -742,18 +818,6 @@ public class Compiler {
                 return ret;
             }
             default: throw new CompileException("Unknown expression type: " + e);
-        }
-    }
-
-    private static void append(ByteArrayOutputStream baos, ByteArrayOutputStream toAppend) {
-        append(baos, toAppend.toByteArray());
-    }
-
-    private static void append(ByteArrayOutputStream baos, byte[] toAppend) {
-        try {
-            baos.write(toAppend);
-        } catch (IOException e) {
-            throw new RuntimeException(e); // Impossible
         }
     }
 

@@ -5,9 +5,37 @@ What did you propose to do?
 Produce a Java program that compiles .fun files into JVM .class files.
 
 what did you actually do?
+The goal was met. All 16 p5 tests pass as if they were run from p5 itself.
 
+There is one caveat though. Since bytecode versions for Java 7 and above, the JVM requires all classfiles to include
+something called stack map frames (which hold the types of local variables) for verification purposes.
+Calculation of these frames, according to the ASM (bytecode modification library)
+community, would involve implementing control and data flow analysis into the compiler, which I'm obviously not capable of doing (yet?).
+Thus, the test classes are executed with the "-noverify" flag which turns all bytecode security verification off.
+
+I *might* try to do some primitive wrangling with this since all our variables have int type, but if you're reading this I
+probably didn't (or forgot to remove this).
 
 What was difficult?
-
+* The same challenges were present - I had to read and understand a very thorough though sometimes hard to understsand specification.
+* At first I ported the instructor-provided parser from p6 to Java for use, but it didn't function in the way I wanted it to, so I ended up
+rewriting a new parser in Java, heavily based on my original parser in p3.
+* Condtionals were a bit tricky:
+    * Fun integers are unsigned and thus we need to call Integer.compareUnsigned(int, int).
+    * That above method returns -1 if a < b, 0 if a == b, and 1 if a > b
+    * If we were compiling normal Java we would just call that method then use iflt, ifgt, ifeq, or ifne to branch.
+    * However, the fun's semantic closeness to C in this context causes a problem.
+    * The normal Java compiler determines the conditional at the same time as the branch instruction. (iflt actually branches if a < b)
+    * But I need expressions like (a CC b) to yield a numerical value at ALL times, not just in while() and if()
+    * I got around that by generating my own helper bridge functions that called Integer.compareUnsigned and then loaded the correct value
+        (0 for false, 1 for true) to return based on the result of compareUnsigned.
+* Stack map frames as mentioned above
 
 What did you learn?
+* Fun is fun
+* Stack machines greatly simplify life, and was really the right choice for a virtual architecture like JVM
+* The class file format in great detail (and even then just a subset!)
+    * Didn't use many features, so some attribute metadata was unneeded
+    * Left off optional attribute metadata usually emitted by real compilers (Line number info, etc.)
+* Strengthened prior knowledge of JVM bytecode
+* Had fun!

@@ -22,7 +22,7 @@ public class FunTest extends TestCase {
 
     @Override
     protected void setUp() {
-        // Generate class files for the fun
+        // Generate class file for the fun
         Main.main(getName() + ".fun");
     }
 
