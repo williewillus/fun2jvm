@@ -34,17 +34,20 @@ public class Compiler {
 
     private Compiler(List<Fun> funs, String name) {
         this.funs = funs;
-        this.className = "" + name;
+        this.className = name;
     }
 
     private short findOrPut(ConstantPoolEntry entry) {
         int index = constantPoolEntries.indexOf(entry);
+        short ret = 0;
         if (index == -1) {
             constantPoolEntries.add(entry);
-            return ((short) constantPoolEntries.size());
+            ret = ((short) constantPoolEntries.size());
         } else {
-            return ((short) (index + 1));
+            ret = ((short) (index + 1));
         }
+
+        return ret;
     }
 
     private short getClassConstant(String name) {
@@ -224,7 +227,7 @@ public class Compiler {
         putShort(ret, findOrPut(new ConstantPoolEntry.Utf8("Code")));
 
         // code attribute attribute length (12 + codeLength below this)
-        int codeAttribLength = 12 + (mainFunArgCount + 4);
+        int codeAttribLength = 12 + (mainFunArgCount + 5);
         putInt(ret, codeAttribLength);
 
         // max stack
@@ -234,7 +237,7 @@ public class Compiler {
         putShort(ret, 1);
 
         // code length
-        int codeLength = mainFunArgCount + 4; // Push args (n) + invokestatic (3) + return (1)
+        int codeLength = mainFunArgCount + 5; // Push args (n) + invokestatic (3) + pop (1) + return (1)
         putInt(ret, codeLength);
 
         for (int i = 0; i < mainFunArgCount; i++) {
@@ -244,6 +247,9 @@ public class Compiler {
         // invokestatic
         ret.write(0xB8);
         putShort(ret, getMethodRef(className, "$main", "(" + String.join("", Collections.nCopies(mainFunArgCount, "I")) + ")I"));
+
+        // pop $main's return value
+        ret.write(0x57);
 
         // Return
         ret.write(0xB1);
@@ -289,7 +295,7 @@ public class Compiler {
         putShort(ret, findOrPut(new ConstantPoolEntry.Utf8("Code")));
 
         // code attribute attribute length (12 + codeLength)
-        int codeAttribLength = 12 + 12;
+        int codeAttribLength = 12 + 14;
         putInt(ret, codeAttribLength);
 
         // max stack
@@ -299,9 +305,15 @@ public class Compiler {
         putShort(ret, 2);
 
         // code length
-        putInt(ret, 12);
+        putInt(ret, 14);
 
         // code
+
+        // iload_0
+        ret.write(0x1A);
+
+        // iload_1
+        ret.write(0x1B);
 
         // invokestatic
         ret.write(0xB8);
@@ -526,17 +538,19 @@ public class Compiler {
                 return ret;
             }
             case PRINT: {
-                ByteArrayOutputStream ret = expression(fun, ((Statement.Print) s).printValue);
+                ByteArrayOutputStream ret = new ByteArrayOutputStream();
+
+                // getstatic System.out
+                ret.write(0xB2);
+                putShort(ret, getFieldRef("java/lang/System", "out", "Ljava/io/PrintStream;"));
+                pushed();
+
+                append(ret, expression(fun, ((Statement.Print) s).printValue));
 
                 // invokestatic
                 ret.write(0xB8);
                 putShort(ret, getMethodRef("java/lang/Integer", "toUnsignedString", "(I)Ljava/lang/String;"));
                 popped();
-                pushed();
-
-                // getstatic System.out
-                ret.write(0xB2);
-                putShort(ret, getFieldRef("java/lang/System", "out", "Ljava/io/PrintStream;"));
                 pushed();
 
                 // invokevirtual
@@ -646,8 +660,8 @@ public class Compiler {
                         short index = findOrPut(new ConstantPoolEntry.Int(valExp.value_unsigned));
 
                         // ldc
-                        ret.write(0x14);
-                        putShort(ret, index);
+                        ret.write(0x12);
+                        ret.write((byte) index);
 
                         break;
                     }
