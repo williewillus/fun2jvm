@@ -1,0 +1,16 @@
+apply plugin: 'java'
+
+archivesBaseName = "fun2jvm"
+
+jar {
+    manifest {
+        attributes (
+            'Main-Class': 'vlee12.Main'
+        )
+    }
+}
+
+compileJava {
+    sourceCompatibility = 1.8
+    targetCompatibility = 1.8
+}
