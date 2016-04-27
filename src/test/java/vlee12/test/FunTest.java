@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.List;
 import java.util.stream.Collectors;
 
 public class FunTest extends TestCase {
@@ -30,14 +31,19 @@ public class FunTest extends TestCase {
         Process p = Runtime.getRuntime().exec("java -noverify " + getName() + " 2>&1");
         p.waitFor();
 
-        String procOutput;
-        String expected;
+        List<String> procOutput;
+        List<String> expected;
 
         try (BufferedReader pout = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
-            procOutput = pout.lines().collect(Collectors.joining("\n")).trim();
+            procOutput = pout.lines()
+                    .filter(s -> !s.trim().isEmpty()) // Ignore whitespace lines
+                    .collect(Collectors.toList());
         }
 
-        expected = Files.lines(Paths.get(getName() + ".ok")).collect(Collectors.joining("\n")).trim();
+        expected = Files
+                .lines(Paths.get(getName() + ".ok"))
+                .filter(s -> !s.trim().isEmpty()) // Ignore whitespace lines
+                .collect(Collectors.toList());
 
         Assert.assertEquals(expected, procOutput);
     }
