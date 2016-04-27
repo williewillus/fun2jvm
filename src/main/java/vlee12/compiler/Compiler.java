@@ -82,9 +82,6 @@ public class Compiler {
     }
 
     private void putShort(ByteArrayOutputStream bytes, int shortToPut) {
-        if ((shortToPut >>> 16 & 0xFFFF) != 0) {
-            System.err.println("Short will be truncated!");
-        }
         bytes.write(shortToPut >>> 8 & 0xFF);
         bytes.write(shortToPut & 0xFF);
     }
@@ -560,25 +557,21 @@ public class Compiler {
             case IF: {
                 Statement.If ifStatement = ((Statement.If) s);
 
-                boolean noElse = ((Statement.If) s).ifElse == null;
-
                 ByteArrayOutputStream ifCondition = expression(fun, ifStatement.ifCondition);
                 ByteArrayOutputStream trueBranch = statement(fun, ifStatement.ifThen);
-                ByteArrayOutputStream elseBranch = noElse ? null : statement(fun, ifStatement.ifElse);
+                ByteArrayOutputStream elseBranch = ifStatement.ifElse == null ? new ByteArrayOutputStream(0) : statement(fun, ifStatement.ifElse);
 
                 ByteArrayOutputStream ret = new ByteArrayOutputStream();
                 append(ret, ifCondition);
 
                 // ifne, jump over elseBranch
                 ret.write(0x9A);
-                putShort(ret, 2 + (noElse ? 0 : elseBranch.size() + 3) + 1); // These two bytes + else branch code + goto at end of else branch
+                putShort(ret, (2 + elseBranch.size() + 3) + 1); // These two bytes + else branch code + goto at end of else branch
 
-                if (!noElse) {
-                    append(ret, elseBranch);
-                    // goto over true branch
-                    ret.write(0xA7);
-                    putShort(ret, (2 + trueBranch.size()) + 1); // These two bytes + true branch code
-                }
+                append(ret, elseBranch);
+                // goto over true branch
+                ret.write(0xA7);
+                putShort(ret, (2 + trueBranch.size()) + 1); // These two bytes + true branch code
 
                 append(ret, trueBranch);
 
@@ -740,7 +733,8 @@ public class Compiler {
 
                 // invokestatic
                 ret.write(0xB8);
-                putShort(ret, getMethodRef(className, call.callName, "(" + String.join("", Collections.nCopies(receiver.formals.size(), "I")) + ")I"));
+                boolean mangle = call.callName.equals("main");
+                putShort(ret, getMethodRef(className, (mangle ? "$" : "") + call.callName, "(" + String.join("", Collections.nCopies(receiver.formals.size(), "I")) + ")I"));
 
                 popped(receiver.formals.size());
                 pushed();
