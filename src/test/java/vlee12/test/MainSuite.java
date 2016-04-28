@@ -18,6 +18,7 @@ public class MainSuite {
         TestSuite ret = new TestSuite("Root suite");
         File testDir = new File(".");
 
+        // Gather all .fun and .ok
         File[] funs = testDir.listFiles((dir, name) -> name.endsWith(".fun"));
         File[] oks = testDir.listFiles((dir, name) -> name.endsWith(".ok"));
         Set<String> toTest = new HashSet<>();
@@ -29,6 +30,7 @@ public class MainSuite {
             for (File f : funsList) {
                 String testName = f.getName().substring(0, f.getName().lastIndexOf(".fun"));
                 if (oksNames.contains(testName + ".ok")) {
+                    // For all funs, if .fun has a .ok, add to test list
                     toTest.add(testName);
                 } else {
                     System.out.printf("%s has no .ok file, skipping ...%n", testName);

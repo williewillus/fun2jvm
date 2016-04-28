@@ -2,22 +2,24 @@ Contribution of each team member:
 N/A (Solo project)
 
 What did you propose to do?
-Produce a Java program that compiles .fun files into JVM .class files.
+Produce a Java program that compiles .fun files into JVM .class files that, when run, produces the same output as if
+p5 or p6 were used to compile and run the corresponding .fun file.
 
 what did you actually do?
-The goal was met. All 16 p5 tests pass as if they were run from p5 itself.
+The goal was met. All 16 p4/5/6 tests pass as if they were run from p4/5/6 itself.
 
 There is one caveat though. Since bytecode versions for Java 7 and above, the JVM requires all classfiles to include
 something called stack map frames (which hold the types of local variables) for verification purposes.
 Calculation of these frames, according to the ASM (bytecode modification library)
-community, would involve implementing control and data flow analysis into the compiler, which I'm obviously not capable of doing (yet?).
+community, would involve implementing high level control and data flow analysis into the compiler, which I'm obviously not capable of doing (yet?).
 Thus, the test classes are executed with the "-noverify" flag which turns all bytecode security verification off.
+Critical errors from a malformed program will still cause the JVM to throw an exception and halt.
 
 I *might* try to do some primitive wrangling with this since all our variables have int type, but if you're reading this I
 probably didn't (or forgot to remove this).
 
 What was difficult?
-* The same challenges were present - I had to read and understand a very thorough though sometimes hard to understsand specification.
+* The same challenges were present - I had to read and understand a very thorough though sometimes hard to understand specification.
 * At first I ported the instructor-provided parser from p6 to Java for use, but it didn't function in the way I wanted it to, so I ended up
 rewriting a new parser in Java, heavily based on my original parser in p3.
 * Condtionals were a bit tricky:
@@ -38,4 +40,3 @@ What did you learn?
     * Didn't use many features, so some attribute metadata was unneeded
     * Left off optional attribute metadata usually emitted by real compilers (Line number info, etc.)
 * Strengthened prior knowledge of JVM bytecode
-* Had fun!
